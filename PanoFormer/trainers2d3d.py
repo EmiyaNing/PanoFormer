@@ -224,7 +224,7 @@ class Trainer:
         save_path = os.path.join(save_folder, "{}.pth".format("model"))
         to_save = self.model.state_dict()
         # save resnet layers - these are needed at prediction time
-        to_save['layers'] = self.settings.num_layers
+        #to_save['layers'] = self.settings.num_layers
         # save the input sizes
         to_save['height'] = self.settings.height
         to_save['width'] = self.settings.width
