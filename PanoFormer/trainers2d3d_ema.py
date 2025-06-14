@@ -23,6 +23,8 @@ import loss_gradient as loss_g
 from network.model import Panoformer as PanoBiT
 from stanford2d3d import Stanford2D3D
 
+from ema_pytorch import EMA
+
 
 def gradient(x):
     gradient_model = loss_g.Gradient_Net()
@@ -30,7 +32,7 @@ def gradient(x):
     return g_x, g_y
 
 
-class Trainer:
+class EMA_Trainer:
     def __init__(self, settings):
         self.settings = settings
 
@@ -39,6 +41,7 @@ class Trainer:
         os.environ["CUDA_VISIBLE_DEVICES"] = self.gpu_devices
 
         self.log_path = os.path.join(self.settings.log_dir, self.settings.model_name)
+        self.ema_val  = settings.ema_val
 
         # data
         train_dataset = Stanford2D3D('../data/train/','./splits2d3d/stanford2d3d_train.txt', 
@@ -64,8 +67,10 @@ class Trainer:
                                      num_workers=self.settings.num_workers, pin_memory=True, drop_last=True)
 
         self.model = PanoBiT()
-
         self.model.to(self.device)
+        self.ema   = EMA(self.model, beta=0.9999, update_after_step = 100, update_every = 5)
+
+
         self.parameters_to_train = list(self.model.parameters())
 
         self.optimizer = optim.Adam(self.parameters_to_train, self.settings.learning_rate)
@@ -115,6 +120,7 @@ class Trainer:
             self.optimizer.zero_grad()
             losses["loss"].backward()
             self.optimizer.step()
+            self.ema.update()
 
             # log less frequently after the first 1000 steps to save time & disk space
             early_phase = batch_idx % self.settings.log_frequency == 0 and self.step < 1000
@@ -144,11 +150,9 @@ class Trainer:
                 inputs[key] = ipt.to(self.device)
 
         losses = {}
-        #print(inputs["val_mask"].size())
 
         equi_inputs = inputs["normalized_rgb"] * inputs["val_mask"]
 
-        # cube_inputs = inputs["normalized_cube_rgb"]
 
         outputs = self.model(equi_inputs)
 
@@ -164,29 +168,62 @@ class Trainer:
         # during the training process
         loss_weight_mask[int(512 * 0.15):int(512 * 0.25), :] = 0.5
         loss_weight_mask[512 - int(512*0.25): 512 - int(512 * 0.15), :] = 0.5
-        # the center region of wall is setted to bigest weights
-        #loss_weight_mask[int(512 * 0.25):512 - int(512 * 0.25), :] = 1.0
+
 
         G_x, G_y = gradient(gt.float())
         p_x, p_y = gradient(pred)
-        #dmap = get_dmap(self.settings.batch_size)
-        #losses["loss"] = self.compute_loss(inputs["gt_depth"].float
-        #                                    () * inputs["val_mask"], outputs["pred_depth"]) +\
-        #                 self.compute_loss(G_x, p_x) +\
-        #                 self.compute_loss(G_y, p_y)
+
         loss_gt_depth   = self.compute_loss(inputs["gt_depth"].float() * inputs["val_mask"] * loss_weight_mask, outputs["pred_depth"] * loss_weight_mask)
         loss_x_gradient = self.compute_loss(G_x * loss_weight_mask, p_x * loss_weight_mask)
         loss_y_gradient = self.compute_loss(G_y * loss_weight_mask, p_y * loss_weight_mask)
         losses["loss"]  = loss_gt_depth + loss_x_gradient + loss_y_gradient
 
-        #outputs["pred_depth"] = pred[inputs["val_mask"]]
+        return outputs, losses
+
+    def process_batch_ema(self, inputs):
+        '''
+            This function only used into the validate process.
+            In this function we only use the ema model to get the outputs.
+        '''
+        for key, ipt in inputs.items():
+            if key not in ["rgb"]:
+                inputs[key] = ipt.to(self.device)
+        
+        losses = {}
+
+
+        equi_inputs           = inputs["normalized_rgb"] * inputs["val_mask"]
+        outputs               = self.ema(equi_inputs)
+        gt                    = inputs["gt_depth"] * inputs["val_mask"]
+        pred                  = outputs["pred_depth"] * inputs["val_mask"]
+        outputs["pred_depth"] = outputs["pred_depth"] * inputs["val_mask"]
+        loss_weight_mask = torch.ones([512, 1024],device=gt.device, dtype=pred.dtype)
+        # the black region's loss will be seted to zeros
+        loss_weight_mask[0:int(512 * 0.15), :] = 0
+        loss_weight_mask[512 - int(512 * 0.15):512, :] = 0
+        # as the floor and ceil is easy to learn we reduce it's importance
+        # during the training process
+        loss_weight_mask[int(512 * 0.15):int(512 * 0.25), :] = 0.5
+        loss_weight_mask[512 - int(512*0.25): 512 - int(512 * 0.15), :] = 0.5
+
+
+        G_x, G_y = gradient(gt.float())
+        p_x, p_y = gradient(pred)
+
+        loss_gt_depth   = self.compute_loss(inputs["gt_depth"].float() * inputs["val_mask"] * loss_weight_mask, outputs["pred_depth"] * loss_weight_mask)
+        loss_x_gradient = self.compute_loss(G_x * loss_weight_mask, p_x * loss_weight_mask)
+        loss_y_gradient = self.compute_loss(G_y * loss_weight_mask, p_y * loss_weight_mask)
+        losses["loss"]  = loss_gt_depth + loss_x_gradient + loss_y_gradient
 
         return outputs, losses
+
+
 
     def validate(self):
         """Validate the model on the validation set
         """
         self.model.eval()
+        self.ema.eval()
 
         self.evaluator.reset_eval_metrics()
 
@@ -195,13 +232,14 @@ class Trainer:
 
         with torch.no_grad():
             for batch_idx, inputs in enumerate(pbar):
-                outputs, losses = self.process_batch(inputs)
+                if not self.ema_val:
+                    outputs, losses = self.process_batch(inputs)
+                else:
+                    outputs, losses = self.process_batch_ema(inputs)
                 pred_depth = outputs["pred_depth"].detach() * inputs["val_mask"]
                 gt_depth = inputs["gt_depth"] * inputs["val_mask"]
 
-
-                #import pdb
-                #pdb.set_trace()
+                # follows code will be used to store the visualize the model's predictions.
                 pred_depth1 = (pred_depth[0] * 512).permute(1, 2, 0).detach().cpu().numpy().astype(np.uint16)
                 pred_depth2 = (pred_depth[1] * 512).permute(1, 2, 0).detach().cpu().numpy().astype(np.uint16)
 
@@ -269,17 +307,6 @@ class Trainer:
 
         save_path = os.path.join(save_folder, "{}.pth".format("model"))
         to_save = self.model.state_dict()
-        # save resnet layers - these are needed at prediction time
-        # to_save['layers'] = self.settings.num_layers
-        # save the input sizes
-        # to_save['height'] = self.settings.height
-        # to_save['width'] = self.settings.width
-        # save the dataset to train on
-        # to_save['dataset'] = self.settings.dataset
-        # to_save['net'] = self.settings.net
-        # to_save['fusion'] = self.settings.fusion
-        # to_save['se_in_fusion'] = self.settings.se_in_fusion
-
         torch.save(to_save, save_path)
 
         save_path = os.path.join(save_folder, "{}.pth".format("adam"))

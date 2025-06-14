@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 import random
+import pdb
 
 import torch
 from torch.utils import data
@@ -84,7 +85,7 @@ class Stanford2D3D(data.Dataset):
         depth_name = os.path.join(self.root_dir, self.rgb_depth_list[idx][1])
         gt_depth = cv2.imread(depth_name, -1)
         gt_depth = cv2.resize(gt_depth, dsize=(1024, 512), interpolation=cv2.INTER_NEAREST)
-        gt_depth = gt_depth.astype(np.float)/512
+        gt_depth = gt_depth.astype(np.float32)/512
         gt_depth[gt_depth > self.max_depth_meters+1] = self.max_depth_meters + 1
 
 
@@ -98,10 +99,11 @@ class Stanford2D3D(data.Dataset):
             rgb = cv2.flip(rgb, 1)
             gt_depth = cv2.flip(gt_depth, 1)
 
-        if self.is_training and self.color_augmentation and random.random() > 0.5:
-            aug_rgb = np.asarray(self.color_aug(transforms.ToPILImage()(rgb)))
-        else:
-            aug_rgb = rgb
+        #if self.is_training and self.color_augmentation and random.random() > 0.5:
+        #    aug_rgb = np.asarray(self.color_aug(transforms.ToPILImage()(rgb)))
+        #else:
+        #    aug_rgb = rgb
+        aug_rgb = rgb
 
         #cube_rgb, cube_gt_depth = self.e2c.run(rgb, gt_depth[..., np.newaxis])
 
