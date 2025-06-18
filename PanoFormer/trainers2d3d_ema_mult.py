@@ -20,7 +20,7 @@ from metrics import compute_depth_metrics, Evaluator
 from losses import BerhuLoss
 import loss_gradient as loss_g
 # from network.Decoder import FCRNDecoder as PanoBiT
-from network.model import Panoformer as PanoBiT
+from network.model_mult_out import PanoformerMult as PanoBiT
 from stanford2d3d import Stanford2D3D
 
 from ema_pytorch import EMA
@@ -32,7 +32,7 @@ def gradient(x):
     return g_x, g_y
 
 
-class EMA_Trainer:
+class EMA_Trainer_Mult:
     def __init__(self, settings):
         self.settings = settings
 
@@ -68,9 +68,7 @@ class EMA_Trainer:
 
         self.model = PanoBiT()
         self.model.to(self.device)
-        self.ema   = EMA(self.model, beta=0.9999, update_after_step = 100, update_every = 5)
-        import pdb
-        pdb.set_trace()
+        self.ema   = EMA(self.model, beta=0.9, update_after_step = 100, update_every = 5)
 
 
         self.parameters_to_train = list(self.model.parameters())
@@ -158,8 +156,14 @@ class EMA_Trainer:
 
         outputs = self.model(equi_inputs)
 
-        gt = inputs["gt_depth"] * inputs["val_mask"]
-        pred = outputs["pred_depth"] * inputs["val_mask"]
+        gt     = inputs["gt_depth"] * inputs["val_mask"]
+        gt_2x  = inputs["gt_depth_2x"] * inputs["val_mask_2x"]
+        gt_4x  = inputs["gt_depth_4x"] * inputs["val_mask_4x"]
+        gt_8x  = inputs["gt_depth_8x"] * inputs["val_mask_8x"]
+        pred   = outputs["pred_depth"] * inputs["val_mask"]
+        pred_2x= outputs["pred_depth2x"] * inputs["val_mask_2x"]
+        pred_4x= outputs["pred_depth4x"] * inputs["val_mask_4x"]
+        pred_8x= outputs["pred_depth8x"] * inputs["val_mask_8x"]
         outputs["pred_depth"] = outputs["pred_depth"] * inputs["val_mask"]
 
         loss_weight_mask = torch.ones([512, 1024],device=gt.device, dtype=pred.dtype)
@@ -175,10 +179,43 @@ class EMA_Trainer:
         G_x, G_y = gradient(gt.float())
         p_x, p_y = gradient(pred)
 
-        loss_gt_depth   = self.compute_loss(inputs["gt_depth"].float() * inputs["val_mask"] * loss_weight_mask, outputs["pred_depth"] * loss_weight_mask)
-        loss_x_gradient = self.compute_loss(G_x * loss_weight_mask, p_x * loss_weight_mask)
-        loss_y_gradient = self.compute_loss(G_y * loss_weight_mask, p_y * loss_weight_mask)
-        losses["loss"]  = loss_gt_depth + loss_x_gradient + loss_y_gradient
+        G_x2x, G_y2x = gradient(gt_2x.float())
+        p_x2x, p_y2x = gradient(pred_2x)
+
+        G_x4x, G_y4x = gradient(gt_4x.float())
+        p_x4x, p_y4x = gradient(pred_4x)
+
+        G_x8x, G_y8x = gradient(gt_8x.float())
+        p_x8x, p_y8x = gradient(pred_8x)
+
+        loss_gt_depth     = self.compute_loss(inputs["gt_depth"].float() * inputs["val_mask"] * loss_weight_mask, outputs["pred_depth"] * loss_weight_mask)
+        loss_x_gradient   = self.compute_loss(G_x * loss_weight_mask, p_x * loss_weight_mask)
+        loss_y_gradient   = self.compute_loss(G_y * loss_weight_mask, p_y * loss_weight_mask)
+        loss_stride1      = loss_gt_depth + loss_x_gradient + loss_y_gradient
+
+
+        loss_2x_depth     = self.compute_loss(inputs["gt_depth_2x"].float() * inputs["val_mask_2x"], outputs["pred_depth2x"])
+        loss_x_gradient_2x= self.compute_loss(G_x2x, p_x2x)
+        loss_y_gradient_2x= self.compute_loss(G_y2x, p_y2x)
+        loss_stride2      = loss_2x_depth + loss_x_gradient_2x + loss_y_gradient_2x
+
+        loss_4x_depth     = self.compute_loss(inputs["gt_depth_4x"].float() * inputs["val_mask_4x"], outputs["pred_depth4x"])
+        loss_x_gradient_4x= self.compute_loss(G_x4x, p_x4x)
+        loss_y_gradient_4x= self.compute_loss(G_y4x, p_y4x)
+        loss_stride4      = loss_4x_depth + loss_x_gradient_4x + loss_y_gradient_4x
+
+        loss_8x_depth     = self.compute_loss(inputs["gt_depth_8x"].float() * inputs["val_mask_8x"], outputs["pred_depth8x"])
+        loss_x_gradient_8x= self.compute_loss(G_x8x, p_x8x)
+        loss_y_gradient_8x= self.compute_loss(G_y8x, p_y8x)
+        loss_stride8      = loss_8x_depth + loss_x_gradient_8x + loss_y_gradient_8x
+        
+        total_loss        = loss_stride1 + 0.4 * loss_stride2 + 0.2 * loss_stride4 + 0.1 * loss_stride8
+
+        losses["loss"]    = total_loss
+        losses["loss_1x"] = loss_stride1.item()
+        losses["loss_2x"] = loss_stride2.item()
+        losses["loss_4x"] = loss_stride4.item()
+        losses["loss_8x"] = loss_stride8.item()
 
         return outputs, losses
 

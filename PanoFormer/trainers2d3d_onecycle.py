@@ -24,6 +24,13 @@ from network.model import Panoformer as PanoBiT
 from stanford2d3d import Stanford2D3D
 
 from ema_pytorch import EMA
+from one_cycle import OneCycle
+
+
+def adjust_learning_rate(optimizer, current_lr, current_moment):
+    for parameter_group in optimizer.param_groups:
+        parameter_group['lr'] = current_lr
+        parameter_group['momentum'] = current_moment
 
 
 def gradient(x):
@@ -32,7 +39,7 @@ def gradient(x):
     return g_x, g_y
 
 
-class EMA_Trainer:
+class EMA_Trainer_Onecycle:
     def __init__(self, settings):
         self.settings = settings
 
@@ -69,8 +76,8 @@ class EMA_Trainer:
         self.model = PanoBiT()
         self.model.to(self.device)
         self.ema   = EMA(self.model, beta=0.9999, update_after_step = 100, update_every = 5)
-        import pdb
-        pdb.set_trace()
+
+        self.lr_schedule = OneCycle(self.settings.num_epochs * len(self.train_loader), self.settings.learning_rate, use_cosine=True)
 
 
         self.parameters_to_train = list(self.model.parameters())
@@ -116,6 +123,9 @@ class EMA_Trainer:
         pbar.set_description("Training Epoch_{}".format(self.epoch))
 
         for batch_idx, inputs in enumerate(pbar):
+
+            lr, moment = self.lr_schedule.calc()
+            adjust_learning_rate(self.optimizer, lr, moment)
 
             outputs, losses = self.process_batch(inputs)
 
