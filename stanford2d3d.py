@@ -88,9 +88,6 @@ class Stanford2D3D(data.Dataset):
         gt_depth = gt_depth.astype(np.float32)/512
         gt_depth[gt_depth > self.max_depth_meters+1] = self.max_depth_meters + 1
 
-        gt_depth_2x = cv2.resize(gt_depth, dsize=(512, 256), interpolation=cv2.INTER_NEAREST)
-        gt_depth_4x = cv2.resize(gt_depth, dsize=(256, 128), interpolation=cv2.INTER_NEAREST)
-        gt_depth_8x = cv2.resize(gt_depth, dsize=(128, 64), interpolation=cv2.INTER_NEAREST)
 
 
         if self.is_training and self.yaw_rotation_augmentation:
@@ -124,22 +121,12 @@ class Stanford2D3D(data.Dataset):
 
 
         inputs["gt_depth"]    = torch.from_numpy(np.expand_dims(gt_depth, axis=0))
-        inputs["gt_depth_2x"] = torch.from_numpy(np.expand_dims(gt_depth_2x, axis=0))
-        inputs["gt_depth_4x"] = torch.from_numpy(np.expand_dims(gt_depth_4x, axis=0))
-        inputs["gt_depth_8x"] = torch.from_numpy(np.expand_dims(gt_depth_8x, axis=0))
 
 
         inputs["val_mask"]    = ((inputs["gt_depth"] > 0) & (inputs["gt_depth"] <= self.max_depth_meters)
                                 & ~torch.isnan(inputs["gt_depth"]))
                                 
         inputs["val_mask"]    = inputs["val_mask"] * mask
-
-        inputs["val_mask_2x"] = ((inputs["gt_depth_2x"] > 0) & (inputs["gt_depth_2x"] <= self.max_depth_meters)
-                                & ~torch.isnan(inputs["gt_depth_2x"]))
-        inputs["val_mask_4x"] = ((inputs["gt_depth_4x"] > 0) & (inputs["gt_depth_4x"] <= self.max_depth_meters)
-                                & ~torch.isnan(inputs["gt_depth_4x"]))
-        inputs["val_mask_8x"] = ((inputs["gt_depth_8x"] > 0) & (inputs["gt_depth_8x"] <= self.max_depth_meters)
-                                & ~torch.isnan(inputs["gt_depth_8x"]))
 
 
         """

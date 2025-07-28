@@ -74,12 +74,10 @@ class EMA_Trainer_Onecycle:
                                    # self.settings.disable_yaw_rotation_augmentation, is_training=False)
         self.val_loader = DataLoader(val_dataset, self.settings.batch_size, False,
                                      num_workers=self.settings.num_workers, pin_memory=True, drop_last=True)
-
-        if not self.settings.light_model:
-            self.model = PanoBiT()
-            #self.model = EGDepthModel()
+        if self.settings.egformer:
+            self.model = EGDepthModel()
         else:
-            self.model = LightPanoBit()
+            self.model = PanoBiT()
         self.model.to(self.device)
         self.ema   = EMA(self.model, beta=0.9999, update_after_step = 100, update_every = 5)
 
@@ -178,22 +176,22 @@ class EMA_Trainer_Onecycle:
         pred = outputs["pred_depth"] * inputs["val_mask"]
         outputs["pred_depth"] = outputs["pred_depth"] * inputs["val_mask"]
 
-        loss_weight_mask = torch.ones([512, 1024],device=gt.device, dtype=pred.dtype)
+        #loss_weight_mask = torch.ones([512, 1024],device=gt.device, dtype=pred.dtype)
         # the black region's loss will be seted to zeros
-        loss_weight_mask[0:int(512 * 0.15), :] = 0
-        loss_weight_mask[512 - int(512 * 0.15):512, :] = 0
+        #loss_weight_mask[0:int(512 * 0.15), :] = 0
+        #loss_weight_mask[512 - int(512 * 0.15):512, :] = 0
         # as the floor and ceil is easy to learn we reduce it's importance
         # during the training process
-        loss_weight_mask[int(512 * 0.15):int(512 * 0.25), :] = 0.5
-        loss_weight_mask[512 - int(512*0.25): 512 - int(512 * 0.15), :] = 0.5
+        #loss_weight_mask[int(512 * 0.15):int(512 * 0.25), :] = 0.5
+        #loss_weight_mask[512 - int(512*0.25): 512 - int(512 * 0.15), :] = 0.5
 
 
         G_x, G_y = gradient(gt.float())
         p_x, p_y = gradient(pred)
 
-        loss_gt_depth   = self.compute_loss(inputs["gt_depth"].float() * inputs["val_mask"] * loss_weight_mask, outputs["pred_depth"] * loss_weight_mask)
-        loss_x_gradient = self.compute_loss(G_x * loss_weight_mask, p_x * loss_weight_mask)
-        loss_y_gradient = self.compute_loss(G_y * loss_weight_mask, p_y * loss_weight_mask)
+        loss_gt_depth   = self.compute_loss(inputs["gt_depth"].float() * inputs["val_mask"] , outputs["pred_depth"])
+        loss_x_gradient = self.compute_loss(G_x , p_x)
+        loss_y_gradient = self.compute_loss(G_y , p_y)
         losses["loss"]  = loss_gt_depth + loss_x_gradient + loss_y_gradient
 
         return outputs, losses
@@ -215,7 +213,7 @@ class EMA_Trainer_Onecycle:
         gt                    = inputs["gt_depth"] * inputs["val_mask"]
         pred                  = outputs["pred_depth"] * inputs["val_mask"]
         outputs["pred_depth"] = outputs["pred_depth"] * inputs["val_mask"]
-        loss_weight_mask = torch.ones([512, 1024],device=gt.device, dtype=pred.dtype)
+        #loss_weight_mask = torch.ones([512, 1024],device=gt.device, dtype=pred.dtype)
         # the black region's loss will be seted to zeros
         #loss_weight_mask[0:int(512 * 0.15), :] = 0
         #loss_weight_mask[512 - int(512 * 0.15):512, :] = 0
@@ -229,8 +227,8 @@ class EMA_Trainer_Onecycle:
         p_x, p_y = gradient(pred)
 
         loss_gt_depth   = self.compute_loss(inputs["gt_depth"].float() * inputs["val_mask"], outputs["pred_depth"] * inputs["val_mask"])
-        loss_x_gradient = self.compute_loss(G_x * loss_weight_mask, p_x * loss_weight_mask)
-        loss_y_gradient = self.compute_loss(G_y * loss_weight_mask, p_y * loss_weight_mask)
+        loss_x_gradient = self.compute_loss(G_x , p_x )
+        loss_y_gradient = self.compute_loss(G_y , p_y)
         losses["loss"]  = loss_gt_depth + loss_x_gradient + loss_y_gradient
 
         return outputs, losses

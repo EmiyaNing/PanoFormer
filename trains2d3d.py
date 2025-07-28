@@ -2,9 +2,6 @@ from __future__ import absolute_import, division, print_function
 import os
 import argparse
 
-from trainers2d3d import Trainer
-from trainers2d3d_ema import EMA_Trainer
-from trainers2d3d_ema_mult import EMA_Trainer_Mult
 from trainers2d3d_onecycle import EMA_Trainer_Onecycle
 
 parser = argparse.ArgumentParser(description="360 Degree Panorama Depth Estimation Training")
@@ -22,19 +19,14 @@ parser.add_argument("--batch_size", type=int, default=2, help="batch size")
 parser.add_argument("--num_epochs", type=int, default=20, help="number of epochs")
 
 # loading and logging settings
-#parser.add_argument("--load_weights_dir", default='./tmp_s2d3d/panodepth/models/weights', type=str, help="folder of model to load")#, default='./tmp_abl_offset/panodepth/models/weights_49'
-#parser.add_argument("--load_weights_dir", default='./tmp_s2d3d/panodepth/best_01_2465/weights_1', type=str)
-parser.add_argument("--load_weights_dir", default='./tmp_s2d3dtest/panodepth/models/weights_0', type=str)
-#parser.add_argument("--load_weights_dir", default=None, type=str)
-#parser.add_argument("--load_weights_dir", default="./pano_verify/panodepth/models/weights_19", type=str)
-parser.add_argument("--log_dir", type=str, default=os.path.join(os.path.dirname(__file__), "pano_verify"), help="log directory")
+#parser.add_argument("--load_weights_dir", default='./tmp_s2d3dtest/panodepth/models/weights_0', type=str)
+parser.add_argument("--load_weights_dir", default=None, type=str)
+parser.add_argument("--log_dir", type=str, default=os.path.join(os.path.dirname(__file__), "egformer"), help="log directory")
 parser.add_argument("--log_frequency", type=int, default=1, help="number of batches between each tensorboard log")
 parser.add_argument("--save_frequency", type=int, default=1, help="number of epochs between each save")
-parser.add_argument("--ema", action="store_true", help="This parameter used to judge whether use ema training")
 parser.add_argument("--ema_val", action="store_true", help="This parameter is used to judge whether use ema to validate")
 parser.add_argument("--one_cycle", action="store_true", help="Use this to judge whether use one_cycle to determine the learning rate.")
-parser.add_argument("--mult", action="store_true", help="This parameter is used to configure mult-stage training")
-parser.add_argument("--light_model", action="store_true", help="This parameter determine whether use the lightweight version panoformer backbone")
+parser.add_argument("--egformer", action="store_true", help="This parameter is used to define which model structure will be used.")
 
 # data augmentation settings
 parser.add_argument("--disable_color_augmentation", action="store_true", help="if set, do not use color augmentation")
@@ -47,16 +39,7 @@ args = parser.parse_args()
 
 
 def main():
-    if not args.ema:
-        trainer = Trainer(args)
-    else:
-        if not args.mult:
-            if not args.one_cycle:
-                trainer = EMA_Trainer(args)
-            else:
-                trainer = EMA_Trainer_Onecycle(args)
-        else:
-            trainer = EMA_Trainer_Mult(args)
+    trainer = EMA_Trainer_Onecycle(args)
     trainer.train()
     #tester = Tester(args)
     #tester.test()
